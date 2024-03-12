@@ -370,8 +370,6 @@ class CheckTest(TestCase):
         data = {
             "go_inception_host": "inception",
             "go_inception_port": "6669",
-            "go_inception_user": "",
-            "go_inception_password": "",
             "inception_remote_backup_host": "mysql",
             "inception_remote_backup_port": 3306,
             "inception_remote_backup_user": "mysql",
@@ -511,6 +509,15 @@ class ChartTest(TestCase):
         expected_rows = ((self.u2.display, 3), (self.u1.display, 2))
         self.assertEqual(result["rows"], expected_rows)
 
+    def testDashboard(self):
+        """Dashboard测试"""
+        # TODO 这部分测试并没有遵循单元测试, 而是某种集成测试, 直接从响应到结果, 并且只检查状态码
+        # TODO 需要具体查看pyecharst有没有被调用, 以及调用的参数
+        c = Client()
+        c.force_login(self.superuser1)
+        r = c.get("/dashboard/")
+        self.assertEqual(r.status_code, 200)
+
 
 class AuthTest(TestCase):
     def setUp(self):
@@ -539,10 +546,7 @@ class AuthTest(TestCase):
 class PermissionTest(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create(
-            username="test_user",
-            display="中文显示",
-            is_active=True,
-            email="XXX@xxx.com",
+            username="test_user", display="中文显示", is_active=True, email="XXX@xxx.com"
         )
         self.client.force_login(self.user)
 

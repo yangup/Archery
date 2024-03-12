@@ -1,4 +1,4 @@
-from django.db import models
+# -*- coding: UTF-8 -*-
 
 
 class Const(object):
@@ -10,29 +10,28 @@ class Const(object):
     }
 
 
-class WorkflowType(models.IntegerChoices):
-    QUERY = 1, "查询权限申请"
-    SQL_REVIEW = 2, "SQL上线申请"
-    ARCHIVE = 3, "数据归档申请"
+class WorkflowDict:
+    # 工作流申请类型，1.query,2.SQL上线申请
+    workflow_type = {
+        "query": 1,
+        "query_display": "查询权限申请",
+        "sqlreview": 2,
+        "sqlreview_display": "SQL上线申请",
+        "archive": 3,
+        "archive_display": "数据归档申请",
+    }
 
-
-class WorkflowStatus(models.IntegerChoices):
-    WAITING = 0, "待审核"
-    PASSED = 1, "审核通过"
-    REJECTED = 2, "审核不通过"
-    ABORTED = 3, "审核取消"
-
-
-class WorkflowAction(models.IntegerChoices):
-    """工单操作列表, 必须是动词, 不是一种状态"""
-
-    SUBMIT = 0, "提交"
-    PASS = 1, "审核通过"
-    REJECT = 2, "审核不通过"
-    ABORT = 3, "审核取消"
-    EXECUTE_SET_TIME = 4, "设置定时执行"
-    EXECUTE_START = 5, "开始执行"
-    EXECUTE_END = 6, "执行结束"
+    # 工作流状态，0.待审核 1.审核通过 2.审核不通过 3.审核取消
+    workflow_status = {
+        "audit_wait": 0,
+        "audit_wait_display": "待审核",
+        "audit_success": 1,
+        "audit_success_display": "审核通过",
+        "audit_reject": 2,
+        "audit_reject_display": "审核不通过",
+        "audit_abort": 3,
+        "audit_abort_display": "审核取消",
+    }
 
 
 class SQLTuning:

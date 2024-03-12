@@ -2,7 +2,6 @@
 import MySQLdb
 import simplejson as json
 import datetime
-import pymysql
 from django.contrib.auth.decorators import permission_required
 from django.db.models import F, Sum, Value as V, Max
 from django.db.models.functions import Concat
@@ -11,12 +10,15 @@ from django.views.decorators.cache import cache_page
 from pyecharts.charts import Line
 from pyecharts import options as opts
 from common.utils.chart_dao import ChartDao
-from sql.engines import get_engine
 
 from sql.utils.resource_group import user_instances
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from .models import Instance, SlowQuery, SlowQueryHistory, AliyunRdsConfig
 
+from .aliyun_rds import (
+    slowquery_review as aliyun_rds_slowquery_review,
+    slowquery_review_history as aliyun_rds_slowquery_review_history,
+)
 
 import logging
 
@@ -27,11 +29,6 @@ logger = logging.getLogger("default")
 @permission_required("sql.menu_slowquery", raise_exception=True)
 def slowquery_review(request):
     instance_name = request.POST.get("instance_name")
-    start_time = request.POST.get("StartTime")
-    end_time = request.POST.get("EndTime")
-    db_name = request.POST.get("db_name")
-    limit = int(request.POST.get("limit"))
-    offset = int(request.POST.get("offset"))
     # 服务端权限校验
     try:
         user_instances(request.user, db_type=["mysql"]).get(instance_name=instance_name)
@@ -43,11 +40,13 @@ def slowquery_review(request):
     instance_info = Instance.objects.get(instance_name=instance_name)
     if AliyunRdsConfig.objects.filter(instance=instance_info, is_enable=True).exists():
         # 调用阿里云慢日志接口
-        query_engine = get_engine(instance=instance_info)
-        result = query_engine.slowquery_review(
-            start_time, end_time, db_name, limit, offset
-        )
+        result = aliyun_rds_slowquery_review(request)
     else:
+        start_time = request.POST.get("StartTime")
+        end_time = request.POST.get("EndTime")
+        db_name = request.POST.get("db_name")
+        limit = int(request.POST.get("limit"))
+        offset = int(request.POST.get("offset"))
         limit = offset + limit
         search = request.POST.get("search")
         sortName = str(request.POST.get("sortName"))
@@ -79,12 +78,8 @@ def slowquery_review(request):
                 MySQLTotalExecutionTimes=Sum(
                     "slowqueryhistory__query_time_sum"
                 ),  # 执行总时长
-                ParseTotalRowCounts=Sum(
-                    "slowqueryhistory__rows_examined_sum"
-                ),  # 扫描总行数
-                ReturnTotalRowCounts=Sum(
-                    "slowqueryhistory__rows_sent_sum"
-                ),  # 返回总行数
+                ParseTotalRowCounts=Sum("slowqueryhistory__rows_examined_sum"),  # 扫描总行数
+                ReturnTotalRowCounts=Sum("slowqueryhistory__rows_sent_sum"),  # 返回总行数
                 ParseRowAvg=Sum("slowqueryhistory__rows_examined_sum")
                 / Sum("slowqueryhistory__ts_cnt"),  # 平均扫描行数
                 ReturnRowAvg=Sum("slowqueryhistory__rows_sent_sum")
@@ -120,12 +115,6 @@ def slowquery_review(request):
 @permission_required("sql.menu_slowquery", raise_exception=True)
 def slowquery_review_history(request):
     instance_name = request.POST.get("instance_name")
-    start_time = request.POST.get("StartTime")
-    end_time = request.POST.get("EndTime")
-    db_name = request.POST.get("db_name")
-    sql_id = request.POST.get("SQLId")
-    limit = int(request.POST.get("limit"))
-    offset = int(request.POST.get("offset"))
     # 服务端权限校验
     try:
         user_instances(request.user, db_type=["mysql"]).get(instance_name=instance_name)
@@ -137,11 +126,14 @@ def slowquery_review_history(request):
     instance_info = Instance.objects.get(instance_name=instance_name)
     if AliyunRdsConfig.objects.filter(instance=instance_info, is_enable=True).exists():
         # 调用阿里云慢日志接口
-        query_engine = get_engine(instance=instance_info)
-        result = query_engine.slowquery_review_history(
-            start_time, end_time, db_name, sql_id, limit, offset
-        )
+        result = aliyun_rds_slowquery_review_history(request)
     else:
+        start_time = request.POST.get("StartTime")
+        end_time = request.POST.get("EndTime")
+        db_name = request.POST.get("db_name")
+        sql_id = request.POST.get("SQLId")
+        limit = int(request.POST.get("limit"))
+        offset = int(request.POST.get("offset"))
         search = request.POST.get("search")
         sortName = str(request.POST.get("sortName"))
         sortOrder = str(request.POST.get("sortOrder")).lower()
@@ -162,9 +154,7 @@ def slowquery_review_history(request):
             sample__icontains=search,
             **filter_kwargs
         ).annotate(
-            ExecutionStartTime=F(
-                "ts_min"
-            ),  # 本次统计(每5分钟一次)该类型sql语句出现的最小时间
+            ExecutionStartTime=F("ts_min"),  # 本次统计(每5分钟一次)该类型sql语句出现的最小时间
             DBName=F("db_max"),  # 数据库名
             HostAddress=Concat(
                 V("'"), "user_max", V("'"), V("@"), V("'"), "client_max", V("'")
@@ -214,7 +204,7 @@ def slowquery_review_history(request):
 def report(request):
     """返回慢SQL历史趋势"""
     checksum = request.GET.get("checksum")
-    checksum = pymysql.escape_string(checksum)
+    checksum = MySQLdb.escape_string(checksum).decode("utf-8")
     cnt_data = ChartDao().slow_query_review_history_by_cnt(checksum)
     pct_data = ChartDao().slow_query_review_history_by_pct_95_time(checksum)
     cnt_x_data = [row[1] for row in cnt_data["rows"]]

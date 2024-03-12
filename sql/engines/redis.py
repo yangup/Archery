@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-"""
+""" 
 @author: hhyo、yyukai
 @license: Apache Licence
 @file: redis.py
@@ -29,27 +29,29 @@ class RedisEngine(EngineBase):
             return redis.cluster.RedisCluster(
                 host=self.host,
                 port=self.port,
-                password=self.password or None,
+                password=self.password,
                 encoding_errors="ignore",
                 decode_responses=True,
                 socket_connect_timeout=10,
-                ssl=self.is_ssl,
             )
         else:
             return redis.Redis(
                 host=self.host,
                 port=self.port,
                 db=db_name,
-                password=self.password or None,
+                password=self.password,
                 encoding_errors="ignore",
                 decode_responses=True,
                 socket_connect_timeout=10,
-                ssl=self.is_ssl,
             )
 
-    name = "Redis"
+    @property
+    def name(self):
+        return "Redis"
 
-    info = "Redis engine"
+    @property
+    def info(self):
+        return "Redis engine"
 
     def test_connection(self):
         return self.get_all_databases()
@@ -70,7 +72,7 @@ class RedisEngine(EngineBase):
                 for i in conn.info("Keyspace").keys()
                 if len(i.split("db")) == 2
             ]
-            rows = max(dbs + [16])
+            rows = max(dbs, [16])
 
         db_list = [str(x) for x in range(int(rows))]
         result.rows = db_list
@@ -144,9 +146,7 @@ class RedisEngine(EngineBase):
             if limit_num > 0:
                 result_set.rows = result_set.rows[0:limit_num]
         except Exception as e:
-            logger.warning(
-                f"Redis命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
-            )
+            logger.warning(f"Redis命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}")
             result_set.error = str(e)
         return result_set
 

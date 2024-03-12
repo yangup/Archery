@@ -22,8 +22,6 @@ from django.conf import settings
 from django.http import Http404
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
 from common.twofa import TwoFactorAuthBase, get_authenticator
-from common.config import SysConfig
-from common.utils.ding_api import get_ding_user_id
 import random
 import json
 import time
@@ -247,9 +245,7 @@ class UserAuth(views.APIView):
 
     permission_classes = [IsOwner]
 
-    @extend_schema(
-        summary="用户认证校验", request=UserAuthSerializer, description="用户认证校验"
-    )
+    @extend_schema(summary="用户认证校验", request=UserAuthSerializer, description="用户认证校验")
     def post(self, request):
         # 参数验证
         serializer = UserAuthSerializer(data=request.data)
@@ -325,9 +321,7 @@ class TwoFAState(views.APIView):
     permission_classes = [IsOwner]
 
     @extend_schema(
-        summary="查询2fa配置情况",
-        request=TwoFAStateSerializer,
-        description="查询2fa配置情况",
+        summary="查询2fa配置情况", request=TwoFAStateSerializer, description="查询2fa配置情况"
     )
     def post(self, request):
         # 参数验证
@@ -426,9 +420,5 @@ class TwoFAVerify(views.APIView):
         if result["status"] == 0 and not request.user.is_authenticated:
             login(request, user, backend="django.contrib.auth.backends.ModelBackend")
             request.session.set_expiry(settings.SESSION_COOKIE_AGE)
-
-            # 更新用户ding_user_id
-            if SysConfig().get("ding_to_person") is True and "admin" not in engineer:
-                get_ding_user_id(engineer)
 
         return Response(result)

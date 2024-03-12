@@ -3,6 +3,7 @@ import re, time
 import pymongo
 import logging
 import traceback
+import json
 import subprocess
 import simplejson as json
 import datetime
@@ -12,11 +13,10 @@ from bson import json_util
 from pymongo.errors import OperationFailure
 from dateutil.parser import parse
 from bson.objectid import ObjectId
-from bson.int64 import Int64
+from datetime import datetime
 
 from . import EngineBase
 from .models import ResultSet, ReviewSet, ReviewResult
-from common.config import SysConfig
 
 logger = logging.getLogger("default")
 
@@ -198,7 +198,6 @@ class JsonDecoder:
                     "newDate",
                     "ISODate",
                     "newISODate",
-                    "NumberLong",
                 ):  # ======类似的类型比较多还需单独处理，如int()等
                     data_type = outstr
                     for c in self.__remain_str():
@@ -232,12 +231,6 @@ class JsonDecoder:
                 date_content = date_regex.findall(outstr)
                 if len(date_content) > 0:
                     return parse(date_content[0], yearfirst=True)
-            elif data_type.replace(" ", "") in ("NumberLong",):
-                nuStr = re.findall(r"NumberLong\(.*?\)", outstr)  # 单独处理NumberLong
-                if len(nuStr) > 0:
-                    id_str = re.findall(r"\(.*?\)", nuStr[0])
-                    nlong = id_str[0].replace(" ", "")[2:-2]
-                    return Int64(nlong)
             elif outstr:
                 return outstr
             raise Exception('Invalid symbol "%s"' % outstr)
@@ -361,11 +354,8 @@ class MongoEngine(EngineBase):
                     _re_msg.append(_line)
 
                 msg = "\n".join(_re_msg)
-                msg = msg.replace("true\n", "")
             except Exception as e:
-                logger.warning(
-                    f"mongo语句执行报错，语句：{sql}，{e}错误信息{traceback.format_exc()}"
-                )
+                logger.warning(f"mongo语句执行报错，语句：{sql}，{e}错误信息{traceback.format_exc()}")
             finally:
                 if is_load:
                     fp.close()
@@ -439,7 +429,7 @@ class MongoEngine(EngineBase):
                     line += 1
                     logger.debug("执行结果：" + r)
                     # 如果执行中有错误
-                    rz = r.replace(" ", "").replace('"', "")
+                    rz = r.replace(" ", "").replace('"', "").lower()
                     tr = 1
                     if (
                         r.lower().find("syntaxerror") >= 0
@@ -448,7 +438,7 @@ class MongoEngine(EngineBase):
                         or rz.find("ReferenceError") >= 0
                         or rz.find("getErrorWithCode") >= 0
                         or rz.find("failedtoconnect") >= 0
-                        or rz.find("Error:") >= 0
+                        or rz.find("Error: field") >= 0
                     ):
                         tr = 0
                     if (rz.find("errmsg") >= 0 or tr == 0) and (
@@ -464,36 +454,14 @@ class MongoEngine(EngineBase):
                             sql=exec_sql,
                         )
                     else:
-                        try:
-                            r = json.loads(r)
-                        except Exception as e:
-                            logger.info(str(e))
-                        finally:
-                            methodStr = exec_sql.split(").")[-1].split("(")[0].strip()
-                            if "." in methodStr:
-                                methodStr = methodStr.split(".")[-1]
-                            if methodStr == "insert":
-                                actual_affected_rows = r.get("nInserted", 0)
-                            elif methodStr in ("insertOne", "insertMany"):
-                                actual_affected_rows = r.count("ObjectId")
-                            elif methodStr == "update":
-                                actual_affected_rows = r.get("nModified", 0)
-                            elif methodStr in ("updateOne", "updateMany"):
-                                actual_affected_rows = r.get("modifiedCount", 0)
-                            elif methodStr in ("deleteOne", "deleteMany"):
-                                actual_affected_rows = r.get("deletedCount", 0)
-                            elif methodStr == "remove":
-                                actual_affected_rows = r.get("nRemoved", 0)
-                            else:
-                                actual_affected_rows = 0
                         # 把结果转换为ReviewSet
                         result = ReviewResult(
                             id=line,
                             errlevel=0,
                             stagestatus="执行结束",
-                            errormessage=str(r),
+                            errormessage=r,
                             execute_time=round(end - start, 6),
-                            affected_rows=actual_affected_rows,
+                            actual_affected_rows=0,  # todo============这个值需要优化
                             sql=exec_sql,
                         )
                     execute_result.rows += [result]
@@ -511,12 +479,7 @@ class MongoEngine(EngineBase):
         count = 0
         check_result = ReviewSet(full_sql=sql)
 
-        # 获取real_row_count参数选项
-        real_row_count = SysConfig().get("real_row_count", False)
-
         sql = sql.strip()
-        # sql 检查过滤注释语句
-        sql = re.sub(r"^\s*//.*$", "", sql, flags=re.MULTILINE)
         if sql.find(";") < 0:
             raise Exception("提交的语句请以分号结尾")
         # 以；切分语句，逐句执行
@@ -570,7 +533,7 @@ class MongoEngine(EngineBase):
                     "renameCollection",
                 ]
                 pattern = re.compile(
-                    r"""^db\.createCollection\(([\s\S]*)\)$|^db\.([\w\.-]+)\.(?:[A-Za-z]+)(?:\([\s\S]*\)$)|^db\.getCollection\((?:\s*)(?:'|")([\w\.-]+)('|")(\s*)\)\.([A-Za-z]+)(\([\s\S]*\)$)"""
+                    r"""^db\.createCollection\(([\s\S]*)\)$|^db\.([\w\.-]+)\.(?:[A-Za-z]+)(?:\([\s\S]*\)$)|^db\.getCollection\((?:\s*)(?:'|")([\w-]*)('|")(\s*)\)\.([A-Za-z]+)(\([\s\S]*\)$)"""
                 )
                 m = pattern.match(check_sql)
                 if (
@@ -608,9 +571,11 @@ class MongoEngine(EngineBase):
                                 check_result.rows += [result]
                                 continue
                         else:
-                            methodStr = sql_str.split(").")[-1].split("(")[0].strip()
-                            if "." in methodStr:
-                                methodStr = methodStr.split(".")[-1]
+                            # method = sql_str.split('.')[2]
+                            # methodStr = method.split('(')[0].strip()
+                            methodStr = (
+                                sql_str.split("(")[0].split(".")[-1].strip()
+                            )  # 最后一个.和括号(之间的字符串作为方法
                         if methodStr in is_exist_premise_method and not is_in:
                             check_result.error = "文档不存在"
                             result = ReviewResult(
@@ -641,8 +606,7 @@ class MongoEngine(EngineBase):
                                         id=line,
                                         errlevel=2,
                                         stagestatus="后台创建索引",
-                                        errormessage="创建索引没有加 background:true"
-                                        + alert,
+                                        errormessage="创建索引没有加 background:true" + alert,
                                         sql=check_sql,
                                     )
                                 elif not is_in:
@@ -653,8 +617,7 @@ class MongoEngine(EngineBase):
                                     )  # 获得表的总条数
                                     if count >= 5000000:
                                         check_result.warning = (
-                                            alert
-                                            + "大于500万条，请在业务低谷期创建索引"
+                                            alert + "大于500万条，请在业务低谷期创建索引"
                                         )
                                         check_result.warning_count += 1
                                         result = ReviewResult(
@@ -690,77 +653,6 @@ class MongoEngine(EngineBase):
                                     sql=check_sql,
                                     execute_time=0,
                                 )
-                            if real_row_count:
-                                if methodStr == "insertOne":
-                                    count = 1
-                                elif methodStr in ("insert", "insertMany"):
-                                    insert_str = re.search(
-                                        rf"{methodStr}\((.*)\)", sql_str, re.S
-                                    ).group(1)
-                                    first_char = insert_str.replace(" ", "").replace(
-                                        "\n", ""
-                                    )[0]
-                                    if first_char == "{":
-                                        count = 1
-                                    elif first_char == "[":
-                                        insert_values = re.search(
-                                            r"\[(.*?)\]", insert_str, re.S
-                                        ).group(0)
-                                        de = JsonDecoder()
-                                        insert_values = de.decode(insert_values)
-                                        count = len(insert_values)
-                                    else:
-                                        count = 0
-                                elif methodStr in (
-                                    "update",
-                                    "updateOne",
-                                    "updateMany",
-                                    "deleteOne",
-                                    "deleteMany",
-                                    "remove",
-                                ):
-                                    if sql_str.find("find(") > 0:
-                                        count_sql = sql_str.replace(methodStr, "count")
-                                    else:
-                                        count_sql = (
-                                            sql_str.replace(methodStr, "find")
-                                            + ".count()"
-                                        )
-                                    query_dict = self.parse_query_sentence(count_sql)
-                                    count_sql = f"""db.getCollection("{query_dict["collection"]}").find({query_dict["condition"]}).count()"""
-                                    query_result = self.query(db_name, count_sql)
-                                    count = json.loads(query_result.rows[0][0]).get(
-                                        "count", 0
-                                    )
-                                    if (
-                                        methodStr == "update"
-                                        and "multi:true"
-                                        not in sql_str.replace(" ", "")
-                                        .replace('"', "")
-                                        .replace("'", "")
-                                        .replace("\n", "")
-                                    ) or methodStr in ("deleteOne", "updateOne"):
-                                        count = 1 if count > 0 else 0
-                            if methodStr in (
-                                "insertOne",
-                                "insert",
-                                "insertMany",
-                                "update",
-                                "updateOne",
-                                "updateMany",
-                                "deleteOne",
-                                "deleteMany",
-                                "remove",
-                            ):
-                                result = ReviewResult(
-                                    id=line,
-                                    errlevel=0,
-                                    stagestatus="Audit completed",
-                                    errormessage="检测通过",
-                                    affected_rows=count,
-                                    sql=check_sql,
-                                    execute_time=0,
-                                )
                         else:
                             result = ReviewResult(
                                 id=line,
@@ -769,6 +661,7 @@ class MongoEngine(EngineBase):
                                 errormessage="仅支持DML和DDL语句，如需查询请使用数据库查询功能！",
                                 sql=check_sql,
                             )
+
                 else:
                     check_result.error = "语法错误"
                     result = ReviewResult(
@@ -811,9 +704,13 @@ class MongoEngine(EngineBase):
             self.conn.close()
             self.conn = None
 
-    name = "Mongo"
+    @property
+    def name(self):  # pragma: no cover
+        return "Mongo"
 
-    info = "Mongo engine"
+    @property
+    def info(self):  # pragma: no cover
+        return "Mongo engine"
 
     def get_roles(self):
         sql_get_roles = "db.system.roles.find({},{_id:1})"
@@ -1037,8 +934,6 @@ class MongoEngine(EngineBase):
         if "condition" in query_dict:
             if method == "aggregate":
                 condition = query_dict["condition"]
-                # 给aggregate查询加limit行数限制，防止返回结果过多导致archery挂掉
-                condition.append({"$limit": limit_num})
             if method == "find":
                 condition = de.decode(query_dict["condition"])
             find_cmd += "(condition)"
@@ -1123,9 +1018,7 @@ class MongoEngine(EngineBase):
                 )
 
         except Exception as e:
-            logger.warning(
-                f"Mongo命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
-            )
+            logger.warning(f"Mongo命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}")
             result_set.error = str(e)
         finally:
             if close_conn:
@@ -1168,7 +1061,7 @@ class MongoEngine(EngineBase):
                     dd = re.findall(re_date, str(value))
                     for d in dd:
                         t = int(d.split(":")[1].strip()[:-1])
-                        e = datetime.datetime.fromtimestamp(t / 1000)
+                        e = datetime.fromtimestamp(t / 1000)
                         value = str(value).replace(
                             d, e.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                         )
@@ -1275,117 +1168,15 @@ class MongoEngine(EngineBase):
         result = ResultSet()
         try:
             conn = self.get_connection()
-        except Exception as e:
-            logger.error(f"{self.name} 连接失败, error: {str(e)}")
-            result.error = str(e)
-            return result
-        for opid in opids:
-            try:
+            db = conn.admin
+            for opid in opids:
                 conn.admin.command({"killOp": 1, "op": opid})
-            except Exception as e:
-                sql = {"killOp": 1, "op": opid}
-                logger.warning(
-                    f"{self.name}语句执行killOp报错，语句：db.runCommand({sql}) ，错误信息{traceback.format_exc()}"
-                )
-                result.error = str(e)
-        return result
-
-    def get_all_databases_summary(self):
-        """实例数据库管理功能，获取实例所有的数据库描述信息"""
-        query_result = self.get_all_databases()
-        if not query_result.error:
-            dbs = query_result.rows
-            conn = self.get_connection()
-
-            # 获取数据库用户信息
-            rows = []
-            for db_name in dbs:
-                # 执行语句
-                listing = conn[db_name].command(command="usersInfo")
-                grantees = []
-                for user_obj in listing["users"]:
-                    grantees.append(
-                        {"user": user_obj["user"], "roles": user_obj["roles"]}.__str__()
-                    )
-                row = {
-                    "db_name": db_name,
-                    "grantees": grantees,
-                    "saved": False,
-                }
-                rows.append(row)
-            query_result.rows = rows
-        return query_result
-
-    def get_instance_users_summary(self):
-        """实例账号管理功能，获取实例所有账号信息"""
-        query_result = self.get_all_databases()
-        if not query_result.error:
-            dbs = query_result.rows
-            conn = self.get_connection()
-
-            # 获取数据库用户信息
-            rows = []
-            for db_name in dbs:
-                # 执行语句
-                listing = conn[db_name].command(command="usersInfo")
-                for user_obj in listing["users"]:
-                    rows.append(
-                        {
-                            "db_name_user": f"{db_name}.{user_obj['user']}",
-                            "db_name": db_name,
-                            "user": user_obj["user"],
-                            "roles": [role["role"] for role in user_obj["roles"]],
-                            "saved": False,
-                        }
-                    )
-            query_result.rows = rows
-        return query_result
-
-    def create_instance_user(self, **kwargs):
-        """实例账号管理功能，创建实例账号"""
-        exec_result = ResultSet()
-        db_name = kwargs.get("db_name", "")
-        user = kwargs.get("user", "")
-        password1 = kwargs.get("password1", "")
-        remark = kwargs.get("remark", "")
-        try:
-            conn = self.get_connection()
-            conn[db_name].command("createUser", user, pwd=password1, roles=[])
-            exec_result.rows = [
-                {
-                    "instance": self.instance,
-                    "db_name": db_name,
-                    "user": user,
-                    "password": password1,
-                    "remark": remark,
-                }
-            ]
         except Exception as e:
-            exec_result.error = str(e)
-        return exec_result
-
-    def drop_instance_user(self, db_name_user: str, **kwarg):
-        """实例账号管理功能，删除实例账号"""
-        arr = db_name_user.split(".")
-        db_name = arr[0]
-        user = arr[1]
-        exec_result = ResultSet()
-        try:
-            conn = self.get_connection()
-            conn[db_name].command("dropUser", user)
-        except Exception as e:
-            exec_result.error = str(e)
-        return exec_result
-
-    def reset_instance_user_pwd(self, db_name_user: str, reset_pwd: str, **kwargs):
-        """实例账号管理功能，重置实例账号密码"""
-        arr = db_name_user.split(".")
-        db_name = arr[0]
-        user = arr[1]
-        exec_result = ResultSet()
-        try:
-            conn = self.get_connection()
-            conn[db_name].command("updateUser", user, pwd=reset_pwd)
-        except Exception as e:
-            exec_result.error = str(e)
-        return exec_result
+            try:
+                sql = {"killOp": 1, "op": _opid}
+            except:
+                sql = {"killOp": 1, "op": ""}
+            logger.warning(
+                f"mongodb语句执行killOp报错，语句：db.runCommand({sql}) ，错误信息{traceback.format_exc()}"
+            )
+            result.error = str(e)

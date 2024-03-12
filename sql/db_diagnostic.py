@@ -11,11 +11,16 @@ from django.http import HttpResponse
 from sql.engines import get_engine
 from common.utils.extend_json_encoder import ExtendJSONEncoder, ExtendJSONEncoderBytes
 from sql.utils.resource_group import user_instances
-from .models import Instance
+from .models import AliyunRdsConfig, Instance
 
+from .aliyun_rds import (
+    process_status as aliyun_process_status,
+    create_kill_session as aliyun_create_kill_session,
+    kill_session as aliyun_kill_session,
+    sapce_status as aliyun_sapce_status,
+)
 
 logger = logging.getLogger("default")
-
 
 # 问题诊断--进程列表
 @permission_required("sql.process_view", raise_exception=True)
@@ -32,12 +37,14 @@ def process(request):
     query_engine = get_engine(instance=instance)
     query_result = None
     if instance.db_type == "mysql":
-        query_result = query_engine.processlist(command_type)
+        # 判断是RDS还是其他实例
+        if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
+            result = aliyun_process_status(request)
+        else:
+            query_result = query_engine.processlist(command_type)
 
     elif instance.db_type == "mongo":
         query_result = query_engine.current_op(command_type)
-    elif instance.db_type == "oracle":
-        query_result = query_engine.session_list(command_type)
     else:
         result = {
             "status": 1,
@@ -75,12 +82,14 @@ def create_kill_session(request):
     result = {"status": 0, "msg": "ok", "data": []}
     query_engine = get_engine(instance=instance)
     if instance.db_type == "mysql":
-        result["data"] = query_engine.get_kill_command(json.loads(thread_ids))
+        # 判断是RDS还是其他实例
+        if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
+            result = aliyun_create_kill_session(request)
+        else:
+            result["data"] = query_engine.get_kill_command(json.loads(thread_ids))
     elif instance.db_type == "mongo":
         kill_command = query_engine.get_kill_command(json.loads(thread_ids))
         result["data"] = kill_command
-    elif instance.db_type == "oracle":
-        result["data"] = query_engine.get_kill_command(json.loads(thread_ids))
     else:
         result = {
             "status": 1,
@@ -111,11 +120,13 @@ def kill_session(request):
     engine = get_engine(instance=instance)
     r = None
     if instance.db_type == "mysql":
-        r = engine.kill(json.loads(thread_ids))
+        # 判断是RDS还是其他实例
+        if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
+            result = aliyun_kill_session(request)
+        else:
+            r = engine.kill(json.loads(thread_ids))
     elif instance.db_type == "mongo":
         r = engine.kill_op(json.loads(thread_ids))
-    elif instance.db_type == "oracle":
-        r = engine.kill_session(json.loads(thread_ids))
     else:
         result = {
             "status": 1,
@@ -135,7 +146,7 @@ def kill_session(request):
 
 # 问题诊断--表空间信息
 @permission_required("sql.tablespace_view", raise_exception=True)
-def tablespace(request):
+def tablesapce(request):
     instance_name = request.POST.get("instance_name")
     offset = int(request.POST.get("offset", 0))
     limit = int(request.POST.get("limit", 14))
@@ -147,9 +158,13 @@ def tablespace(request):
 
     query_engine = get_engine(instance=instance)
     if instance.db_type == "mysql":
-        query_result = query_engine.tablespace(offset, limit)
-    elif instance.db_type == "oracle":
-        query_result = query_engine.tablespace(offset, limit)
+        # 判断是RDS还是其他实例
+        if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
+            result = aliyun_sapce_status(request)
+        else:
+            query_result = query_engine.tablesapce(offset, limit)
+            r = query_engine.tablesapce_num()
+            total = r.rows[0][0]
     else:
         result = {
             "status": 1,
@@ -161,8 +176,6 @@ def tablespace(request):
     if query_result:
         if not query_result.error:
             table_space = query_result.to_dict()
-            r = query_engine.tablespace_count()
-            total = r.rows[0][0]
             result = {"status": 0, "msg": "ok", "rows": table_space, "total": total}
         else:
             result = {"status": 1, "msg": query_result.error}
@@ -187,8 +200,7 @@ def trxandlocks(request):
     query_engine = get_engine(instance=instance)
     if instance.db_type == "mysql":
         query_result = query_engine.trxandlocks()
-    elif instance.db_type == "oracle":
-        query_result = query_engine.lock_info()
+
     else:
         result = {
             "status": 1,

@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-
 from clickhouse_driver import connect
-from clickhouse_driver.util.escape import escape_chars_map
 from sql.utils.sql_utils import get_syntax_type
 from .models import ResultSet, ReviewResult, ReviewSet
 from common.utils.timer import FuncTimer
@@ -42,12 +41,13 @@ class ClickHouseEngine(EngineBase):
             )
         return self.conn
 
-    name = "ClickHouse"
-    info = "ClickHouse engine"
+    @property
+    def name(self):
+        return "ClickHouse"
 
-    def escape_string(self, value: str) -> str:
-        """字符串参数转义"""
-        return "%s" % "".join(escape_chars_map.get(c, c) for c in value)
+    @property
+    def info(self):
+        return "ClickHouse engine"
 
     @property
     def auto_backup(self):
@@ -63,9 +63,11 @@ class ClickHouseEngine(EngineBase):
 
     def get_table_engine(self, tb_name):
         """获取某个table的engine type"""
-        db, tb = tb_name.split(".")
-        sql = f"""select engine from system.tables where database=%(db)s and name=%(tb)s"""
-        query_result = self.query(sql=sql, parameters={"db": db, "tb": tb})
+        sql = f"""select engine 
+                    from system.tables 
+                   where database='{tb_name.split('.')[0]}' 
+                     and name='{tb_name.split('.')[1]}'"""
+        query_result = self.query(sql=sql)
         if query_result.rows:
             result = {"status": 1, "engine": query_result.rows[0][0]}
         else:
@@ -102,20 +104,15 @@ class ClickHouseEngine(EngineBase):
         from
             system.columns
         where
-            database = %(db_name)s
-        and table = %(tb_name)s;"""
-        result = self.query(
-            db_name=db_name,
-            sql=sql,
-            parameters={"db_name": db_name, "tb_name": tb_name},
-        )
+            database = '{db_name}'
+        and table = '{tb_name}';"""
+        result = self.query(db_name=db_name, sql=sql)
         column_list = [row[0] for row in result.rows]
         result.rows = column_list
         return result
 
     def describe_table(self, db_name, tb_name, **kwargs):
         """return ResultSet 类似查询"""
-        tb_name = self.escape_string(tb_name)
         sql = f"show create table `{tb_name}`;"
         result = self.query(db_name=db_name, sql=sql)
 
@@ -124,21 +121,13 @@ class ClickHouseEngine(EngineBase):
         )
         return result
 
-    def query(
-        self,
-        db_name=None,
-        sql="",
-        limit_num=0,
-        close_conn=True,
-        parameters=None,
-        **kwargs,
-    ):
+    def query(self, db_name=None, sql="", limit_num=0, close_conn=True, **kwargs):
         """返回 ResultSet"""
         result_set = ResultSet(full_sql=sql)
         try:
             conn = self.get_connection(db_name=db_name)
             cursor = conn.cursor()
-            cursor.execute(sql, parameters)
+            cursor.execute(sql)
             if int(limit_num) > 0:
                 rows = cursor.fetchmany(size=int(limit_num))
             else:
@@ -167,7 +156,7 @@ class ClickHouseEngine(EngineBase):
         except IndexError:
             result["bad_query"] = True
             result["msg"] = "没有有效的SQL语句"
-        if re.match(r"^select|^show|^explain|^with", sql, re.I) is None:
+        if re.match(r"^select|^show|^explain", sql, re.I) is None:
             result["bad_query"] = True
             result["msg"] = "不支持的查询语法类型!"
         if "*" in sql:
@@ -360,11 +349,11 @@ class ClickHouseEngine(EngineBase):
             # insert语句，explain无法正确判断，暂时只做表存在性检查与简单关键字匹配
             elif re.match(r"^insert", statement.lower()):
                 if re.match(
-                    r"^insert\s+into\s+([a-zA-Z_][0-9a-zA-Z_.]+)([\w\W]*?)(values|format|select)(\s+|\()",
+                    r"^insert\s+into\s+(.+?)(\s+|\s*\(.+?)(values|format|select)(\s+|\()",
                     statement.lower(),
                 ):
                     table_name = re.match(
-                        r"^insert\s+into\s+([a-zA-Z_][0-9a-zA-Z_.]+)([\w\W]*?)(values|format|select)(\s+|\()",
+                        r"^insert\s+into\s+(.+?)(\s+|\s*\(.+?)(values|format|select)(\s+|\()",
                         statement.lower(),
                         re.M,
                     ).group(1)
@@ -473,14 +462,14 @@ class ClickHouseEngine(EngineBase):
                 break
         return execute_result
 
-    def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
+    def execute(self, db_name=None, sql="", close_conn=True):
         """原生执行语句"""
         result = ResultSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         try:
             cursor = conn.cursor()
             for statement in sqlparse.split(sql):
-                cursor.execute(statement, parameters)
+                cursor.execute(statement)
             cursor.close()
         except Exception as e:
             logger.warning(f"ClickHouse语句执行报错，语句：{sql}，错误信息{e}")

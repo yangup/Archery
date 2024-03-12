@@ -16,24 +16,18 @@ class MssqlEngine(EngineBase):
     test_query = "SELECT 1"
 
     def get_connection(self, db_name=None):
-        connstr = """DRIVER=ODBC Driver 18 for SQL Server;SERVER={0},{1};UID={2};PWD={3};
-client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes;""".format(
+        connstr = """DRIVER=ODBC Driver 17 for SQL Server;SERVER={0},{1};UID={2};PWD={3};
+client charset = UTF-8;connect timeout=10;CHARSET={4};""".format(
             self.host,
             self.port,
             self.user,
             self.password,
             self.instance.charset or "UTF8",
         )
-        if db_name:
-            connstr = f"{connstr};DATABASE={db_name}"
         if self.conn:
             return self.conn
         self.conn = pyodbc.connect(connstr)
         return self.conn
-
-    name = "MsSQL"
-
-    info = "MsSQL engine"
 
     def get_all_databases(self):
         """获取数据库列表, 返回一个ResultSet"""
@@ -50,8 +44,10 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
     def get_all_tables(self, db_name, **kwargs):
         """获取table 列表, 返回一个ResultSet"""
         sql = """SELECT TABLE_NAME
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_TYPE = 'BASE TABLE' order by TABLE_NAME;"""
+        FROM {0}.INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE = 'BASE TABLE' order by TABLE_NAME;""".format(
+            db_name
+        )
         result = self.query(db_name=db_name, sql=sql)
         tb_list = [row[0] for row in result.rows if row[0] not in ["test"]]
         result.rows = tb_list
@@ -84,7 +80,7 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
     def get_table_meta_data(self, db_name, tb_name, **kwargs):
         """数据字典页面使用：获取表格的元信息，返回一个dict{column_list: [], rows: []}"""
         sql = f"""
-            SELECT space.*,table_comment,index_length,IDENT_CURRENT(?) as auto_increment
+            SELECT space.*,table_comment,index_length,IDENT_CURRENT('{tb_name}') as auto_increment
             FROM (
             SELECT 
                 t.NAME AS table_name,
@@ -103,7 +99,7 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
             INNER JOIN 
                 sys.allocation_units a ON p.partition_id = a.container_id
             WHERE 
-                t.NAME =?
+                t.NAME ='{tb_name}'
                 AND t.is_ms_shipped = 0
                 AND i.OBJECT_ID > 255 
             GROUP BY 
@@ -124,7 +120,7 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
                 t.NAME				AS table_name,
                 SUM(page_count * 8) AS index_length
             FROM sys.dm_db_index_physical_stats(
-                db_id(), object_id(?), NULL, NULL, 'DETAILED') AS s
+                db_id(), object_id('{tb_name}'), NULL, NULL, 'DETAILED') AS s
             JOIN sys.indexes AS i
             ON s.[object_id] = i.[object_id] AND s.index_id = i.index_id
             INNER JOIN      
@@ -133,15 +129,7 @@ client charset = UTF-8;connect timeout=10;CHARSET={4};TrustServerCertificate=yes
             ) AS index_size 
             ON index_size.table_name = space.table_name;
         """
-        _meta_data = self.query(
-            db_name,
-            sql,
-            parameters=(
-                tb_name,
-                tb_name,
-                tb_name,
-            ),
-        )
+        _meta_data = self.query(db_name, sql)
         return {"column_list": _meta_data.column_list, "rows": _meta_data.rows[0]}
 
     def get_table_desc_data(self, db_name, tb_name, **kwargs):
@@ -152,15 +140,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 COLLATION_NAME 列字符集,
                 IS_NULLABLE 是否为空,
                 COLUMN_DEFAULT 默认值
-            from INFORMATION_SCHEMA.columns where TABLE_CATALOG=? and TABLE_NAME = ?;"""
-        _desc_data = self.query(
-            db_name,
-            sql,
-            parameters=(
-                db_name,
-                tb_name,
-            ),
-        )
+            from INFORMATION_SCHEMA.columns where TABLE_CATALOG='{db_name}' and TABLE_NAME = '{tb_name}';"""
+        _desc_data = self.query(db_name, sql)
         return {"column_list": _desc_data.column_list, "rows": _desc_data.rows}
 
     def get_table_index_data(self, db_name, tb_name, **kwargs):
@@ -171,9 +152,9 @@ i.index_id = t.index_id and t.is_included_column = 0 order by key_ordinal for xm
                 i.name AS 索引名,
                 is_unique as 唯一性,is_primary_key as 是否主建
             FROM sys.indexes AS i  
-            WHERE i.object_id = OBJECT_ID(?)
+            WHERE i.object_id = OBJECT_ID('{tb_name}')
             group by i.name,i.object_id,i.index_id,is_unique,is_primary_key;"""
-        _index_data = self.query(db_name, sql, parameters=(tb_name,))
+        _index_data = self.query(db_name, sql)
         return {"column_list": _index_data.column_list, "rows": _index_data.rows}
 
     def get_tables_metas_data(self, db_name, **kwargs):
@@ -208,10 +189,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 COLLATION_NAME,
                 IS_NULLABLE,
                 COLUMN_DEFAULT
-            from INFORMATION_SCHEMA.columns where TABLE_CATALOG=? and TABLE_NAME = '{tb["TABLE_NAME"]}';"""
-            query_result = self.query(
-                db_name=db_name, sql=sql_cols, close_conn=False, parameters=(db_name,)
-            )
+            from INFORMATION_SCHEMA.columns where TABLE_CATALOG='{db_name}' and TABLE_NAME = '{tb["TABLE_NAME"]}';"""
+            query_result = self.query(db_name=db_name, sql=sql_cols, close_conn=False)
 
             columns = []
             # 转换查询结果为dict
@@ -237,17 +216,19 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         c.scale   ColumnScale,
         c.isnullable ColumnNull,
             case when i.id is not null then 'Y' else 'N' end TablePk
-        from (select name,id,uid from sysobjects where (xtype='U' or xtype='V') ) o 
-        inner join syscolumns c on o.id=c.id 
-        inner join systypes t on c.xtype=t.xusertype 
-        left join sysusers u on u.uid=o.uid
-        left join (select name,id,uid,parent_obj from sysobjects where xtype='PK' )  opk on opk.parent_obj=o.id 
-        left join (select id,name,indid from sysindexes) ie on ie.id=o.id and ie.name=opk.name
-        left join sysindexkeys i on i.id=o.id and i.colid=c.colid and i.indid=ie.indid
+        from (select name,id,uid from {0}..sysobjects where (xtype='U' or xtype='V') ) o 
+        inner join {0}..syscolumns c on o.id=c.id 
+        inner join {0}..systypes t on c.xtype=t.xusertype 
+        left join {0}..sysusers u on u.uid=o.uid
+        left join (select name,id,uid,parent_obj from {0}..sysobjects where xtype='PK' )  opk on opk.parent_obj=o.id 
+        left join (select id,name,indid from {0}..sysindexes) ie on ie.id=o.id and ie.name=opk.name
+        left join {0}..sysindexkeys i on i.id=o.id and i.colid=c.colid and i.indid=ie.indid
         WHERE O.name NOT LIKE 'MS%' AND O.name NOT LIKE 'SY%'
-        and O.name=?
-        order by o.name,c.colid"""
-        result = self.query(db_name=db_name, sql=sql, parameters=(tb_name,))
+        and O.name='{1}'
+        order by o.name,c.colid""".format(
+            db_name, tb_name
+        )
+        result = self.query(sql=sql)
         return result
 
     def query_check(self, db_name=None, sql=""):
@@ -316,32 +297,18 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         # 对查询sql增加limit限制
         if re.match(r"^select", sql_lower):
             if sql_lower.find(" top ") == -1:
-                if sql_lower.find(" distinct ") > 0:
-                    return sql_lower.replace(
-                        "distinct", "distinct top {}".format(limit_num)
-                    )
                 return sql_lower.replace("select", "select top {}".format(limit_num))
         return sql.strip()
 
-    def query(
-        self,
-        db_name=None,
-        sql="",
-        limit_num=0,
-        close_conn=True,
-        parameters: tuple = None,
-        **kwargs,
-    ):
+    def query(self, db_name=None, sql="", limit_num=0, close_conn=True, **kwargs):
         """返回 ResultSet"""
         result_set = ResultSet(full_sql=sql)
         try:
-            conn = self.get_connection(db_name)
+            conn = self.get_connection()
             cursor = conn.cursor()
-            # https://github.com/mkleehammer/pyodbc/wiki/Cursor#executesql-parameters
-            if parameters:
-                cursor.execute(sql, *parameters)
-            else:
-                cursor.execute(sql)
+            if db_name:
+                cursor.execute("use [{}];".format(db_name))
+            cursor.execute(sql)
             if int(limit_num) > 0:
                 rows = cursor.fetchmany(int(limit_num))
             else:
@@ -352,9 +319,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             result_set.rows = [tuple(x) for x in rows]
             result_set.affected_rows = len(result_set.rows)
         except Exception as e:
-            logger.warning(
-                f"MsSQL语句执行报错，语句：{sql}，错误信息{traceback.format_exc()}"
-            )
+            logger.warning(f"MsSQL语句执行报错，语句：{sql}，错误信息{traceback.format_exc()}")
             result_set.error = str(e)
         finally:
             if close_conn:
@@ -406,7 +371,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content
         )
 
-    def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
+    def execute(self, db_name=None, sql="", close_conn=True):
         """执行sql语句 返回 Review set"""
         execute_result = ReviewSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
@@ -422,9 +387,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             try:
                 cursor.execute(statement)
             except Exception as e:
-                logger.warning(
-                    f"Mssql命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
-                )
+                logger.warning(f"Mssql命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}")
                 execute_result.error = str(e)
                 execute_result.rows.append(
                     ReviewResult(

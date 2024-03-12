@@ -29,9 +29,13 @@ class ODPSEngine(EngineBase):
 
         return self.conn
 
-    name = "ODPS"
+    @property
+    def name(self):
+        return "ODPS"
 
-    info = "ODPS engine"
+    @property
+    def info(self):
+        return "ODPS engine"
 
     def get_all_databases(self):
         """获取数据库列表, 返回一个ResultSet

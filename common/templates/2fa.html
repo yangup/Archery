@@ -18,7 +18,7 @@
 </head>
 <body onload="document.getElementById('otpCode').focus()" style="background-color:#edeff1;">
 <div class="row lsb-login">
-    <div class="col-sm-3 login-form-wrapper">
+    <div class="col-sm-3 mypanalbox">
         <form class="login-form fade-in-effect" id="auth" method="post" role="form">
             {% csrf_token %}
             {% if verify_mode == 'verify_config' %}
@@ -228,7 +228,6 @@
                 key: $("#qrcode-img").attr('key'),
                 phone: $("#phone").val()
             },
-            async: false,
             complete: function () {
             },
             success: function (data) {
