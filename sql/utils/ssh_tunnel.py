@@ -64,7 +64,7 @@ class SSHConnection(object):
         :param request:
         :return:
         """
-        return "127.0.0.1", self.server.local_bind_port
+        return "archery", self.server.local_bind_port
 
     def get_private_key(self):
         private_key_file_obj = io.StringIO()
