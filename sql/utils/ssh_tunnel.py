@@ -11,6 +11,7 @@ from paramiko import RSAKey, Ed25519Key, ECDSAKey, DSSKey, PKey
 from cryptography.hazmat.primitives import serialization as crypto_serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, dsa, rsa, ec
 import io
+import os
 
 
 class SSHConnection(object):
@@ -64,7 +65,7 @@ class SSHConnection(object):
         :param request:
         :return:
         """
-        return "archery", self.server.local_bind_port
+        return os.getenv('HOSTNAME',default='127.0.0.1'), self.server.local_bind_port
 
     def get_private_key(self):
         private_key_file_obj = io.StringIO()
