@@ -455,7 +455,7 @@ class MysqlEngine(EngineBase):
     ):
         """返回 ResultSet"""
         result_set = ResultSet(full_sql=sql)
-        max_execution_time = kwargs.get("max_execution_time", 0)
+        max_execution_time = kwargs.get("max_execution_time", 5000)
         cursorclass = kwargs.get("cursorclass") or MySQLdb.cursors.Cursor
         try:
             conn = self.get_connection(db_name=db_name)
