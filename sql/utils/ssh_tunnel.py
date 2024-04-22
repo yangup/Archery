@@ -80,9 +80,6 @@ class SSHConnection(object):
         file_bytes = bytes(file_obj.read(), 'utf-8')
         password = self.pkey_password
         password_byte = bytes(password, 'utf-8') if password else None
-        logger.warning("password_byte = bytes(password, 'utf-8') if password else None")
-        logger.warning(password_byte)
-        logger.warning(password)
         try:
             key = crypto_serialization.load_ssh_private_key(
                 file_bytes,
