@@ -3,6 +3,7 @@ import logging
 import traceback
 import MySQLdb
 import pymysql
+import json
 import re
 
 import schemaobject
@@ -56,6 +57,10 @@ class MysqlEngine(EngineBase):
     test_query = "SELECT 1"
 
     def __init__(self, instance=None):
+
+        logger.warning("MysqlEngine.__init__")
+        logger.warning(json.dump(instance))
+
         super().__init__(instance=instance)
         self.config = SysConfig()
         self.inc_engine = GoInceptionEngine()
