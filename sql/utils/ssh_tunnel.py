@@ -68,8 +68,6 @@ class SSHConnection(object):
         :param request:
         :return:
         """
-        logger.warning("os.getenv('HOSTNAME', default='127.0.0.1')")
-        logger.warning(os.getenv('HOSTNAME', default='127.0.0.1'))
         return os.getenv('HOSTNAME', default='127.0.0.1'), self.server.local_bind_port
 
     # 1. 错误 RSAPrivateKey
