@@ -22,6 +22,19 @@ services:
       MYSQL_DATABASE: archery
       MYSQL_ROOT_PASSWORD: 123456
 
+  mysql_sink:
+    image: mysql:5.7
+    container_name: mysql_sink
+    restart: always
+    ports:
+      - "3307:3306"
+    volumes:
+      - "./mysql/my_sink.cnf:/etc/mysql/my.cnf"
+      - "./mysql/datadir_sink:/var/lib/mysql"
+    environment:
+      MYSQL_DATABASE: archery
+      MYSQL_ROOT_PASSWORD: 123456
+
   goinception:
     image: hanchuanchuan/goinception
     container_name: goinception
