@@ -127,6 +127,7 @@ def instance(request):
             result["status"] = 1
             result["msg"] = "无法连接实例,error,\n{}".format(test_result.error)
     except Exception as e:
+        logger.error(e)
         result["status"] = 1
         result["msg"] = "无法连接实例,exception,\n{}".format(str(e))
     # 返回结果
