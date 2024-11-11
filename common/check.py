@@ -125,9 +125,9 @@ def instance(request):
         test_result = engine.test_connection()
         if test_result.error:
             result["status"] = 1
-            result["msg"] = "无法连接实例,\n{}".format(test_result.error)
+            result["msg"] = "无法连接实例,error,\n{}".format(test_result.error)
     except Exception as e:
         result["status"] = 1
-        result["msg"] = "无法连接实例,\n{}".format(str(e))
+        result["msg"] = "无法连接实例,exception,\n{}".format(str(e))
     # 返回结果
     return HttpResponse(json.dumps(result), content_type="application/json")
