@@ -805,8 +805,8 @@ class MongoEngine(EngineBase):
                 connect=True,
                 connectTimeoutMS=10000,
             )
-        if self.user and self.password:
-            self.conn[self.db_name].authenticate(self.user, self.password, auth_db)
+            if self.user and self.password:
+                self.conn[self.db_name].authenticate(self.user, self.password, auth_db)
         return self.conn
 
     def close(self):
