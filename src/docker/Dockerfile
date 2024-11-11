@@ -2,7 +2,9 @@ FROM hhyo/archery-base:sha-b3a08ef
 
 WORKDIR /opt/archery
 
-ADD http://mirrors.ustc.edu.cn/epel/RPM-GPG-KEY-EPEL-7 /etc/pki/rpm-gpg/
+# https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7
+# ADD http://mirrors.ustc.edu.cn/epel/RPM-GPG-KEY-EPEL-7 /etc/pki/rpm-gpg/
+ADD https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7 /etc/pki/rpm-gpg/
 COPY . /opt/archery/
 
 #archery
