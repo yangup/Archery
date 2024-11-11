@@ -45,7 +45,7 @@ services:
       - "./inception/config.toml:/etc/config.toml"
 
   archery:
-    image: registry.ksmdev.top/kit/docker-images/archery:v1.10.0__1.3
+    image: registry.ksmdev.top/kit/docker-images/archery:v1.10.0__2
     container_name: archery
     restart: always
     ports:
